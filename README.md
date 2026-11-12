@@ -1,149 +1,127 @@
-# Selenium Framework
+# Claude Code setup
 
-A Java test automation framework for an e-commerce web app, built with **Selenium WebDriver**, **TestNG** and **Cucumber**, using the **Page Object Model**.
+This repository is set up so that [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) works on the framework the way a team member would: it knows how to build and test the project, follows the Page Object conventions, checks its own edits compile, and can be asked to do work straight from a GitHub issue.
 
-The tests run against the store at <https://rahulshettyacademy.com/client/>: they log in, add a product to the cart, check out and verify the order, plus negative tests for wrong logins and products.
+Every file below is committed, so anyone who clones the repo and runs `claude` gets the same behaviour.
 
-## Tech stack
+The framework itself (tech stack, project structure, how to run the tests and set the `TEST_EMAIL` / `TEST_PASSWORD` login) is described in [docs/framework.md](docs/framework.md).
 
-| Tool | Version | Used for |
+## At a glance
+
+| File | What it is | Why it's here |
 |---|---|---|
-| Java | 17+ | Language |
-| Maven | 3.9+ | Build and dependencies |
-| Selenium WebDriver | 4.36.0 | Browser automation |
-| TestNG | 7.11.0 | Test runner, data providers, groups, retries |
-| Cucumber | 7.30.0 | BDD feature files (Gherkin) |
-| Extent Reports | 5.1.2 | HTML test report with screenshots |
-| Jackson | 3.0.0 | Reading JSON test data |
-
-## Project structure
+| [`CLAUDE.md`](CLAUDE.md) | Project memory, loaded at the start of every session | Build commands, conventions and known pitfalls Claude can't work out from the code |
+| [`.claude/settings.json`](.claude/settings.json) | Shared permissions and hooks | No prompts for the build loop, no access to credentials, compile check after every edit |
+| [`.claude/skills/new-page-object/SKILL.md`](.claude/skills/new-page-object/SKILL.md) | Custom skill (`/new-page-object`) | The framework's recipe for adding a page, loaded only when needed |
+| [`.claude/agents/test-reviewer.md`](.claude/agents/test-reviewer.md) | Read-only subagent | Reviews tests for flakiness and missing cleanup in its own context |
+| [`.github/workflows/claude.yml`](.github/workflows/claude.yml) | GitHub Actions workflow | Comment `@claude` on an issue or PR and Claude does the work in CI |
 
 ```
-SeleniumFrameworkDes/
-├── pom.xml
-├── TestSuite/
-│   ├── testng.xml            # Full suite (all tests + Extent listener)
-│   ├── Purchase.xml          # Only tests in the "Purchase" group
-│   └── ErrorValid.xml        # Only tests in the "Error Handling" group
-└── src/
-    ├── main/java/rsa/
-    │   ├── abstractcomponents/
-    │   │   └── AbstractComponent.java   # Shared waits, header navigation, JS clicks
-    │   ├── pageobjects/                 # One class per page
-    │   │   ├── LandingPage.java
-    │   │   ├── ProductCatalog.java
-    │   │   ├── CartPage.java
-    │   │   ├── CheckoutPage.java
-    │   │   ├── ConfirmationPage.java
-    │   │   └── OrderPage.java
-    │   └── resources/
-    │       ├── GlobalData.properties    # browser=chrome
-    │       └── ExtentReporterNG.java    # Extent report setup
-    └── test/java/
-        ├── rsa/tests/
-        │   ├── SubmitOrderTest.java       # Place an order, then check order history
-        │   └── ErrorValidationsTest.java  # Wrong login / wrong product checks
-        ├── rsa/testcomponents/
-        │   ├── BaseTest.java     # Opens and quits the browser for each test
-        │   ├── Listeners.java    # Extent report + screenshot on failure
-        │   └── Retry.java        # Retries a flaky test once
-        ├── rsa/data/
-        │   ├── DataReader.java
-        │   └── PurchaseOrder.json   # Test data (login + product per row)
-        ├── rsa/stepDefinitions/
-        │   └── StepDefinitionImpl.java
-        └── cucumber/
-            ├── SubmitOrder.feature
-            ├── ErrorValidation.feature
-            └── TestNGTestRunner.java
+Claude_Code/
+├── CLAUDE.md
+├── .claude/
+│   ├── settings.json
+│   ├── skills/new-page-object/SKILL.md
+│   └── agents/test-reviewer.md
+├── .github/workflows/claude.yml
+├── README.md                      # this file
+├── docs/framework.md              # the test framework: setup, running the tests, test data
+└── SeleniumFrameworkDes/          # the Maven project
 ```
 
-## Prerequisites
+## 1. `CLAUDE.md`: project memory
 
-- JDK 17 or newer
-- Maven 3.9 or newer
-- Google Chrome (Selenium Manager downloads the matching ChromeDriver automatically)
+Claude Code reads `CLAUDE.md` at the start of every session. It holds three things:
 
-## Running the tests
+- **Commands**: how to build, run every test, or run a single test class. The Maven project sits in a subfolder, so each command passes `-f SeleniumFrameworkDes/pom.xml` and works from the repository root.
+- **Conventions**: one Page Object per page extending `AbstractComponent`, explicit waits instead of `Thread.sleep`, tests extending `BaseTest`, and test data in JSON files.
+- **Don'ts**: mistakes that are easy to make and hard to spot.
 
-Set your test login first (see [Test data](#test-data)), then clone the repository and go to the project folder:
+**Design choices**
 
-```bash
-git clone https://github.com/ankyhunk/Claude_Code.git
-cd Claude_Code/SeleniumFrameworkDes
-```
+- **Keep it short.** `CLAUDE.md` is loaded into every session, so every line costs context. It only holds what Claude can't infer by reading the code. Longer procedures belong in skills (see section 3).
+- **Write down real pitfalls.** The JUnit rule comes from a real bug in this project. With JUnit 5 on the classpath, Maven Surefire switches to the JUnit Platform provider and silently runs zero TestNG tests, so the build passes while testing nothing. One line here stops it from happening again.
 
-Run the full TestNG suite (`TestSuite/testng.xml`):
+## 2. `.claude/settings.json`: permissions and hooks
 
-```bash
-mvn clean test
-```
-
-Run a single test class:
-
-```bash
-mvn test -Dtest=SubmitOrderTest
-```
-
-Run only one group (`Purchase.xml` or `ErrorValid.xml`): right-click the file in Eclipse, then **Run As → TestNG Suite**. `pom.xml` always points Maven at `testng.xml`.
-
-Run the Cucumber scenarios:
-
-```bash
-mvn test -Dtest=TestNGTestRunner
-```
-### In Eclipse
-
-1. **File → Import → Maven → Existing Maven Projects**, then choose the `SeleniumFrameworkDes` folder.
-2. Right-click the project, then **Maven → Update Project**.
-3. Right-click `TestSuite/testng.xml`, then **Run As → TestNG Suite** (needs the TestNG plugin from the Eclipse Marketplace).
-
-## Test data
-
-The tests log in to the store with your own account, which is never stored in the repository. Create a free account at <https://rahulshettyacademy.com/client/>, then set two environment variables before running the tests:
-
-```bash
-export TEST_EMAIL="you@example.com"
-export TEST_PASSWORD="your-password"
-```
-
-On Windows (PowerShell), for the current session:
-
-```powershell
-$env:TEST_EMAIL = "you@example.com"; $env:TEST_PASSWORD = "your-password"
-```
-
-Or pass them to Maven: `mvn clean test -Dtest.email=you@example.com -Dtest.password=your-password`. To run from Eclipse, set them as Windows user environment variables and restart Eclipse.
-
-`src/test/java/rsa/data/PurchaseOrder.json` holds one row per order to place. The login fields are placeholders that `TestCredentials` fills in:
+### Permissions
 
 ```json
-[
-  { "email": "${TEST_EMAIL}", "password": "${TEST_PASSWORD}", "product": "ZARA COAT 3" }
-]
+"allow": ["Bash(mvn *)", "Bash(git status)", "Bash(git diff *)"],
+"deny":  ["Read(./.env)", "Edit(**/PurchaseOrder.json)"]
 ```
 
-`submitOrder` runs once for each row through a TestNG data provider. The Cucumber feature files use the same placeholders.
+- **Allowed without asking:** Maven commands and read-only git commands. Claude can build, test and inspect changes without a permission prompt each time.
+- **Still asks:** everything else, including `git commit` and `git push`. A person approves anything that changes history or leaves the machine.
+- **Denied:** reading `.env` and editing `PurchaseOrder.json`. The test login isn't stored in the repo at all: it comes from the `TEST_EMAIL` / `TEST_PASSWORD` environment variables, and data files hold only `${TEST_EMAIL}` placeholders. `PurchaseOrder.json` is locked because other tests depend on its rows (`OrderHistoryTest` checks the order placed by its second row), so new tests get their own data files.
 
-## Claude Code setup
+Personal overrides go in `.claude/settings.local.json`, which is git-ignored.
 
-This repo is configured for [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), so it follows the framework's conventions out of the box:
+### Compile hook
 
-| File | Purpose |
-|---|---|
-| `CLAUDE.md` | Build/test commands, Page Object conventions and known pitfalls |
-| `.claude/settings.json` | Permissions (no access to credentials) and a hook that compiles after every edit |
-| `.claude/skills/new-page-object/` | `/new-page-object` skill: adds a Page Object and a matching test |
-| `.claude/agents/test-reviewer.md` | Read-only subagent that reviews tests for flakiness and missing cleanup |
-| `.github/workflows/claude.yml` | Comment `@claude` on an issue or PR to have Claude do the work in CI |
+```json
+"PostToolUse": [{
+  "matcher": "Edit|Write",
+  "hooks": [{ "type": "command",
+              "command": "mvn -q -f SeleniumFrameworkDes/pom.xml test-compile 1>&2 || exit 2" }]
+}]
+```
 
-See [docs/claude-code-setup.md](docs/claude-code-setup.md) for how each piece works and why it's designed that way.
+After every file Claude edits or writes, the hook compiles the project, both the main code and the tests. Using `test-compile` rather than `compile` matters, because `compile` skips `src/test`, and most edits in a test framework are to tests.
 
-## Reports
+- **How the errors reach Claude:** `-q` keeps Maven quiet when the build succeeds. When it fails, `1>&2` sends Maven's error lines to stderr and `exit 2` tells Claude Code to pass them back to Claude. Claude then sees the exact file, line and error, and fixes it in the next step.
+- **Why it isn't optional:** this is a hook rather than an instruction in `CLAUDE.md` because hooks always run. Claude can't forget them or decide to skip them.
+- **Trade-offs:** it compiles the tests but doesn't run them. Compiling takes about 15–20 seconds, mostly Maven starting up, while the test suite drives a real browser against a live site and takes minutes, too slow to run after every edit. The cost is that wait after each edit, including edits to non-Java files. Narrowing the matcher or running the Maven daemon (`mvnd`) would cut it.
 
-| Report | Location |
-|---|---|
-| Extent report (with failure screenshots) | `reports/index.html` |
-| TestNG report | `target/surefire-reports/index.html` |
-| Cucumber report | `target/Cucumber.html` |
+## 3. Skill: `/new-page-object`
 
+A skill is a packaged procedure that Claude loads only when it's relevant. This one holds the framework's recipe for adding a page:
+
+1. Create the Page Object in `rsa/pageobjects`, extending `AbstractComponent`, with `@FindBy` locators and `PageFactory.initElements`.
+2. Add the navigation method on the page that leads to it.
+3. Add a TestNG test extending `BaseTest`.
+4. Build and run the new test, and fix anything that fails.
+
+Use it by typing `/new-page-object OrderHistoryPage`. Claude also picks it up on its own when you ask for something like "add a page object for the order history page", because the skill's `description` says when to use it.
+
+**Why a skill and not more `CLAUDE.md`:** the recipe only matters when adding a page. As a skill, it costs no context in the sessions where it isn't needed.
+
+## 4. Subagent: `test-reviewer`
+
+A subagent is a separate Claude instance with its own instructions, tools and context window. `test-reviewer` checks tests for:
+
+- `Thread.sleep` and missing explicit waits, the main causes of flaky Selenium tests
+- test data hard-coded in the test instead of read from JSON
+- missing `@AfterMethod(alwaysRun = true)` cleanup, which leaves browsers open after failures
+- assertions that can never fail
+
+It reports findings as `file:line`.
+
+To use it, ask: "Use the test-reviewer subagent on the tests I just changed."
+
+**Design choices**
+
+- **Read-only tools** (`Read`, `Grep`, `Glob`): a reviewer that can edit might "fix" a failing check by weakening the test. With read-only tools, it can only report, and the main session or a person decides what to change.
+- **Its own context:** the review starts fresh rather than inheriting the reasoning that produced the code, so it doesn't share its blind spots. It also keeps the main conversation free of review noise.
+
+## 5. GitHub Actions: `@claude` in issues and pull requests
+
+`.github/workflows/claude.yml` runs [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) whenever an issue or PR comment contains `@claude`. For example, open an issue saying "Add a page object for the Orders page", then comment `@claude implement this`. Claude works on a branch in CI and opens a pull request for review.
+
+- **Same rules as locally:** in CI, Claude runs in the checked-out repo and reads the same `CLAUDE.md` and skill, so its work follows the same conventions as a local session.
+- **Cost control:** it runs only when someone writes `@claude`, not on every push, and the API key has a spending limit in the Claude Console.
+- **Permissions:** the job gets only what it needs to push a branch and comment (`contents`, `pull-requests`, `issues`) plus `id-token` for the action's GitHub authentication. The API key is stored as the `ANTHROPIC_API_KEY` repository secret, never in the file.
+- **Setup:** running `/install-github-app` in Claude Code installs the GitHub app and adds the secret.
+
+## Try it yourself
+
+1. **Hook:** ask Claude to add a method to `CartPage` and mistype a variable name. The compile error comes straight back from the hook, and Claude fixes it without being told.
+2. **Skill:** run `/new-page-object OrderHistoryPage`. You get a Page Object, a navigation method and a test that builds.
+3. **Subagent:** add `Thread.sleep(3000);` to a test, then ask for a review with the `test-reviewer` subagent. It reports the line.
+4. **CI:** open an issue, comment `@claude implement this`, and review the pull request it opens.
+
+## What I'd add next
+
+- **A PreToolUse hook that blocks `git push --force`:** a hard rule rather than a prompt.
+- **A browser MCP server** (such as Playwright MCP): Claude could open the store and find locators itself instead of guessing from page source.
+- **A pull-request workflow that runs the test suite** in headless Chrome, so Claude's PRs are tested before review.
